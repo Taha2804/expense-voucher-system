@@ -1,0 +1,6 @@
+{
+  "name": "Expense Voucher Management System",
+  "description": "Digitized expense reimbursement lifecycle for ABC Company with employee submissions, director approvals, and accounts team processing.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
