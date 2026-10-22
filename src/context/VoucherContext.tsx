@@ -115,37 +115,37 @@ export const VoucherProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     setIsSupabaseLive(true);
 
+    const mapDbRow = (row: any): Voucher => ({
+      id: row.id || row.voucher_number,
+      voucherNumber: row.voucher_number || row.voucherNumber,
+      voucherDate: row.voucher_date || row.voucherDate,
+      expenseDate: row.expense_date || row.expenseDate,
+      department: row.department,
+      expenseTitle: row.expense_title || row.expenseTitle,
+      expenseCategory: row.expense_category || row.expenseCategory,
+      expenseDescription: row.expense_description || row.expenseDescription,
+      amount: Number(row.amount),
+      employeeId: row.employee_id || row.employeeId,
+      employeeName: row.employee_name || row.employeeName,
+      employeeCode: row.employee_code || row.employeeCode,
+      employeeSignature: row.employee_signature || row.employeeSignature,
+      receiptUrl: row.receipt_url || row.receiptUrl,
+      receiptName: row.receipt_name || row.receiptName,
+      status: row.status,
+      directorSignature: row.director_signature || row.directorSignature,
+      approvalDate: row.approval_date || row.approvalDate,
+      rejectionReason: row.rejection_reason || row.rejectionReason,
+      isReimbursed: Boolean(row.is_reimbursed || row.isReimbursed),
+      reimbursedDate: row.reimbursed_date || row.reimbursedDate,
+      paymentReference: row.payment_reference || row.paymentReference,
+      createdAt: row.created_at || row.createdAt,
+      updatedAt: row.updated_at || row.updatedAt,
+    });
+
     // Initial fetch from Supabase
     supabase.from('vouchers').select('*').then(({ data, error }) => {
       if (!error && data && data.length > 0) {
-        // Map database snake_case to frontend camelCase if needed
-        const mapped: Voucher[] = data.map((row: any) => ({
-          id: row.id,
-          voucherNumber: row.voucher_number || row.voucherNumber,
-          voucherDate: row.voucher_date || row.voucherDate,
-          expenseDate: row.expense_date || row.expenseDate,
-          department: row.department,
-          expenseTitle: row.expense_title || row.expenseTitle,
-          expenseCategory: row.expense_category || row.expenseCategory,
-          expenseDescription: row.expense_description || row.expenseDescription,
-          amount: Number(row.amount),
-          employeeId: row.employee_id || row.employeeId,
-          employeeName: row.employee_name || row.employeeName,
-          employeeCode: row.employee_code || row.employeeCode,
-          employeeSignature: row.employee_signature || row.employeeSignature,
-          receiptUrl: row.receipt_url || row.receiptUrl,
-          receiptName: row.receipt_name || row.receiptName,
-          status: row.status,
-          directorSignature: row.director_signature || row.directorSignature,
-          approvalDate: row.approval_date || row.approvalDate,
-          rejectionReason: row.rejection_reason || row.rejectionReason,
-          isReimbursed: Boolean(row.is_reimbursed || row.isReimbursed),
-          reimbursedDate: row.reimbursed_date || row.reimbursedDate,
-          paymentReference: row.payment_reference || row.paymentReference,
-          createdAt: row.created_at || row.createdAt,
-          updatedAt: row.updated_at || row.updatedAt,
-        }));
-        setRawVouchers(mapped);
+        setRawVouchers(data.map(mapDbRow));
       }
     });
 
@@ -157,10 +157,9 @@ export const VoucherProvider: React.FC<{ children: React.ReactNode }> = ({ child
         { event: '*', schema: 'public', table: 'vouchers' },
         (payload: any) => {
           setLastLiveEvent(`Supabase Realtime: ${payload.eventType} event on vouchers`);
-          // Re-fetch or update
           supabase.from('vouchers').select('*').then(({ data }) => {
             if (data && data.length > 0) {
-              setRawVouchers(data);
+              setRawVouchers(data.map(mapDbRow));
             }
           });
         }
@@ -375,6 +374,24 @@ export const VoucherProvider: React.FC<{ children: React.ReactNode }> = ({ child
       updatedList
     );
 
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        await supabase.from('vouchers').update({
+          expense_title: updatedVoucher.expenseTitle,
+          expense_category: updatedVoucher.expenseCategory,
+          expense_description: updatedVoucher.expenseDescription,
+          amount: updatedVoucher.amount,
+          department: updatedVoucher.department,
+          status: updatedVoucher.status,
+          employee_signature: updatedVoucher.employeeSignature,
+          updated_at: updatedVoucher.updatedAt,
+        }).eq('voucher_number', existing.voucherNumber);
+      } catch (err) {
+        console.warn('Supabase updateDraft error:', err);
+      }
+    }
+
     if (submitNow) {
       confetti({ particleCount: 40, spread: 70, origin: { y: 0.75 } });
     }
@@ -398,6 +415,16 @@ export const VoucherProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const updatedList = rawVouchers.filter(v => v.id !== id);
     setRawVouchers(updatedList);
     notifyChange(`Deleted draft voucher ${existing.voucherNumber}`, updatedList);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        await supabase.from('vouchers').delete().eq('voucher_number', existing.voucherNumber);
+      } catch (err) {
+        console.warn('Supabase delete error:', err);
+      }
+    }
+
     return true;
   };
 
@@ -429,6 +456,20 @@ export const VoucherProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const updatedList = rawVouchers.map(v => v.id === id ? approvedVoucher : v);
     setRawVouchers(updatedList);
     notifyChange(`Approved voucher ${existing.voucherNumber}`, updatedList);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        await supabase.from('vouchers').update({
+          status: 'Approved',
+          director_signature: directorSignature,
+          approval_date: approvedVoucher.approvalDate,
+          updated_at: approvedVoucher.updatedAt,
+        }).eq('voucher_number', existing.voucherNumber);
+      } catch (err) {
+        console.warn('Supabase approve error:', err);
+      }
+    }
 
     // Celebration confetti
     confetti({
@@ -469,6 +510,19 @@ export const VoucherProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setRawVouchers(updatedList);
     notifyChange(`Rejected voucher ${existing.voucherNumber}`, updatedList);
 
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        await supabase.from('vouchers').update({
+          status: 'Rejected',
+          rejection_reason: rejectionReason.trim(),
+          updated_at: rejectedVoucher.updatedAt,
+        }).eq('voucher_number', existing.voucherNumber);
+      } catch (err) {
+        console.warn('Supabase reject error:', err);
+      }
+    }
+
     return rejectedVoucher;
   };
 
@@ -496,6 +550,20 @@ export const VoucherProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const updatedList = rawVouchers.map(v => v.id === id ? updatedVoucher : v);
     setRawVouchers(updatedList);
     notifyChange(`Settled reimbursement for ${existing.voucherNumber}`, updatedList);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        await supabase.from('vouchers').update({
+          is_reimbursed: true,
+          reimbursed_date: updatedVoucher.reimbursedDate,
+          payment_reference: updatedVoucher.paymentReference,
+          updated_at: updatedVoucher.updatedAt,
+        }).eq('voucher_number', existing.voucherNumber);
+      } catch (err) {
+        console.warn('Supabase mark reimbursed error:', err);
+      }
+    }
 
     return updatedVoucher;
   };

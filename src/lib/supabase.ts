@@ -3,9 +3,12 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 const STORAGE_KEY_URL = 'abccompany_supabase_url';
 const STORAGE_KEY_KEY = 'abccompany_supabase_anon_key';
 
+const DEFAULT_SUPABASE_URL = 'https://numqkiodetwrvlsekaln.supabase.co';
+const DEFAULT_SUPABASE_KEY = 'sb_publishable_pj0Ahny9r4mIHjAUzPjhPA_aZ2nU7DD';
+
 export function getStoredSupabaseConfig(): { url: string; anonKey: string } {
-  const envUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
-  const envKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
+  const envUrl = (import.meta as any).env?.VITE_SUPABASE_URL || DEFAULT_SUPABASE_URL;
+  const envKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_KEY;
   
   const storedUrl = localStorage.getItem(STORAGE_KEY_URL) || envUrl;
   const storedKey = localStorage.getItem(STORAGE_KEY_KEY) || envKey;

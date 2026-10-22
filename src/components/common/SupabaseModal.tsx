@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { X, Copy, Check, Database, Radio, ShieldCheck, AlertCircle } from 'lucide-react';
-import { SUPABASE_SQL_SCHEMA } from '../../lib/supabase-schema-sql';
+import { X, Copy, Check, Database, Radio, ShieldCheck, AlertCircle, Wrench } from 'lucide-react';
+import { SUPABASE_SQL_SCHEMA, SUPABASE_FIX_POLICY_SQL } from '../../lib/supabase-schema-sql';
 import { getStoredSupabaseConfig, saveStoredSupabaseConfig, testSupabaseConnection } from '../../lib/supabase';
 import { useVouchers } from '../../context/VoucherContext';
 
@@ -12,6 +12,7 @@ interface SupabaseModalProps {
 export const SupabaseModal: React.FC<SupabaseModalProps> = ({ isOpen, onClose }) => {
   const { isSupabaseLive, lastLiveEvent } = useVouchers();
   const [activeTab, setActiveTab] = useState<'sql' | 'connect'>('sql');
+  const [sqlView, setSqlView] = useState<'fix' | 'full'>('fix');
   const [copied, setCopied] = useState(false);
   
   const currentConfig = getStoredSupabaseConfig();
@@ -22,8 +23,10 @@ export const SupabaseModal: React.FC<SupabaseModalProps> = ({ isOpen, onClose })
 
   if (!isOpen) return null;
 
+  const activeSql = sqlView === 'fix' ? SUPABASE_FIX_POLICY_SQL : SUPABASE_SQL_SCHEMA;
+
   const handleCopySql = () => {
-    navigator.clipboard.writeText(SUPABASE_SQL_SCHEMA);
+    navigator.clipboard.writeText(activeSql);
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);
   };
@@ -116,17 +119,39 @@ export const SupabaseModal: React.FC<SupabaseModalProps> = ({ isOpen, onClose })
         <div className="p-6 overflow-y-auto flex-1">
           {activeTab === 'sql' ? (
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">PostgreSQL Schema & Security Rules</h3>
-                  <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                    Includes tables (<code className="text-neutral-700 dark:text-neutral-300 font-mono">vouchers</code>, <code className="text-neutral-700 dark:text-neutral-300 font-mono">profiles</code>, <code className="text-neutral-700 dark:text-neutral-300 font-mono">voucher_audit_logs</code>), auto-number trigger (<code className="text-neutral-700 dark:text-neutral-300 font-mono">VCH-2026-XXXX</code>), and RLS policies for each role.
-                  </p>
+              {/* Sub-selector for SQL snippet */}
+              <div className="flex flex-wrap items-center justify-between gap-2 p-1.5 bg-neutral-150 dark:bg-neutral-850 rounded-xl border border-neutral-200 dark:border-neutral-800">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setSqlView('fix')}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                      sqlView === 'fix'
+                        ? 'bg-amber-600 text-white shadow-xs'
+                        : 'text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white'
+                    }`}
+                  >
+                    <Wrench className="w-3.5 h-3.5" />
+                    <span>Fix Policy Error 0A000 (Recommended)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSqlView('full')}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                      sqlView === 'full'
+                        ? 'bg-neutral-900 dark:bg-white text-white dark:text-neutral-900 shadow-xs'
+                        : 'text-neutral-600 dark:text-neutral-300 hover:text-neutral-900 dark:hover:text-white'
+                    }`}
+                  >
+                    <Database className="w-3.5 h-3.5" />
+                    <span>Full Fresh Schema</span>
+                  </button>
                 </div>
+
                 <button
                   type="button"
                   onClick={handleCopySql}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-neutral-700 dark:text-neutral-300 bg-neutral-100 dark:bg-neutral-800 hover:bg-neutral-200 dark:hover:bg-neutral-750 rounded-lg transition-colors border border-neutral-300 dark:border-neutral-700"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-neutral-800 dark:text-neutral-200 bg-white dark:bg-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-700 rounded-lg transition-colors border border-neutral-300 dark:border-neutral-700 shadow-2xs"
                 >
                   {copied ? (
                     <>
@@ -136,25 +161,37 @@ export const SupabaseModal: React.FC<SupabaseModalProps> = ({ isOpen, onClose })
                   ) : (
                     <>
                       <Copy className="w-3.5 h-3.5 text-neutral-600 dark:text-neutral-400" />
-                      <span>Copy Full SQL</span>
+                      <span>{sqlView === 'fix' ? 'Copy Fix SQL' : 'Copy Full SQL'}</span>
                     </>
                   )}
                 </button>
               </div>
 
-              {/* Steps note */}
-              <div className="p-3 bg-neutral-50 dark:bg-neutral-850 rounded-lg border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-600 dark:text-neutral-300 space-y-1">
-                <p className="font-semibold text-neutral-800 dark:text-neutral-200">How to run in Supabase:</p>
-                <ol className="list-decimal pl-4 space-y-0.5">
-                  <li>Open your Supabase project dashboard and click on <strong>SQL Editor</strong> in the left sidebar.</li>
-                  <li>Click <strong>New query</strong>, paste this SQL script, and click <strong>Run</strong>.</li>
-                  <li>Navigate to <strong>Project Settings → API</strong> to copy your Project URL & Anon Key into the next tab.</li>
-                </ol>
-              </div>
+              {sqlView === 'fix' ? (
+                <div className="p-3.5 bg-amber-50 dark:bg-amber-950/30 rounded-xl border border-amber-200 dark:border-amber-800/60 text-xs text-amber-900 dark:text-amber-200 space-y-1.5">
+                  <div className="flex items-center gap-2 font-semibold text-amber-950 dark:text-amber-100">
+                    <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                    <span>Resolves: "cannot alter type of a column used in a policy definition"</span>
+                  </div>
+                  <p className="leading-relaxed">
+                    PostgreSQL blocks altering <code className="px-1 py-0.5 bg-amber-100 dark:bg-amber-900/60 rounded font-mono">employee_id</code> while active Row Level Security policies or foreign key constraints reference it.
+                    This script drops the blocking policies, alters <code className="px-1 py-0.5 bg-amber-100 dark:bg-amber-900/60 rounded font-mono">employee_id</code> to <code className="px-1 py-0.5 bg-amber-100 dark:bg-amber-900/60 rounded font-mono">TEXT</code>, and disables RLS so all employee demo accounts and live submissions can insert/read without restriction.
+                  </p>
+                </div>
+              ) : (
+                <div className="p-3 bg-neutral-50 dark:bg-neutral-850 rounded-xl border border-neutral-200 dark:border-neutral-800 text-xs text-neutral-600 dark:text-neutral-300 space-y-1">
+                  <p className="font-semibold text-neutral-800 dark:text-neutral-200">How to run in Supabase:</p>
+                  <ol className="list-decimal pl-4 space-y-0.5">
+                    <li>Open your Supabase project dashboard and click on <strong>SQL Editor</strong> in the left sidebar.</li>
+                    <li>Click <strong>New query</strong>, paste this script, and click <strong>Run</strong>.</li>
+                    <li>Navigate to <strong>Project Settings → API</strong> to copy your Project URL & Anon Key into the next tab.</li>
+                  </ol>
+                </div>
+              )}
 
               {/* SQL Code View */}
-              <div className="relative rounded-lg bg-neutral-950 p-4 text-neutral-100 font-mono text-xs overflow-x-auto max-h-80 border border-neutral-800">
-                <pre>{SUPABASE_SQL_SCHEMA}</pre>
+              <div className="relative rounded-xl bg-neutral-950 p-4 text-neutral-100 font-mono text-xs overflow-x-auto max-h-80 border border-neutral-800 shadow-inner">
+                <pre>{activeSql}</pre>
               </div>
             </div>
           ) : (

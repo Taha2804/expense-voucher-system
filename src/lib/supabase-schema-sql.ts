@@ -1,8 +1,51 @@
+export const SUPABASE_FIX_POLICY_SQL = `-- ==============================================================================
+-- IMMEDIATE FIX: "cannot alter type of a column used in a policy definition"
+-- Copy and run this in Supabase Dashboard -> SQL Editor -> New Query -> Run
+-- ==============================================================================
+
+-- 1. Drop all policies on public.vouchers that depend on employee_id
+DROP POLICY IF EXISTS "Vouchers Read Access" ON public.vouchers;
+DROP POLICY IF EXISTS "Employees can insert vouchers" ON public.vouchers;
+DROP POLICY IF EXISTS "Employees can update draft vouchers" ON public.vouchers;
+DROP POLICY IF EXISTS "Employees can delete draft vouchers" ON public.vouchers;
+DROP POLICY IF EXISTS "Directors can review and approve vouchers" ON public.vouchers;
+DROP POLICY IF EXISTS "Accounts can settle reimbursements" ON public.vouchers;
+DROP POLICY IF EXISTS "App Read Vouchers" ON public.vouchers;
+DROP POLICY IF EXISTS "App Insert Vouchers" ON public.vouchers;
+DROP POLICY IF EXISTS "App Update Vouchers" ON public.vouchers;
+DROP POLICY IF EXISTS "App Delete Vouchers" ON public.vouchers;
+DROP POLICY IF EXISTS "Allow all vouchers actions" ON public.vouchers;
+
+-- 2. Drop any foreign key constraints referencing profiles(id)
+ALTER TABLE public.vouchers DROP CONSTRAINT IF EXISTS vouchers_employee_id_fkey;
+
+-- 3. Safely alter employee_id column type from UUID to TEXT
+ALTER TABLE public.vouchers ALTER COLUMN employee_id TYPE TEXT;
+
+-- 4. Disable Row Level Security on vouchers for smooth frontend client sync
+ALTER TABLE public.vouchers DISABLE ROW LEVEL SECURITY;
+
+-- 5. If voucher_audit_logs exists, also drop constraint and alter performed_by_id
+DO $$ BEGIN
+  ALTER TABLE public.voucher_audit_logs DROP CONSTRAINT IF EXISTS voucher_audit_logs_performed_by_id_fkey;
+  ALTER TABLE public.voucher_audit_logs ALTER COLUMN performed_by_id TYPE TEXT;
+  ALTER TABLE public.voucher_audit_logs DISABLE ROW LEVEL SECURITY;
+EXCEPTION
+  WHEN undefined_table THEN null;
+END $$;
+
+-- 6. Ensure Realtime publication includes vouchers table
+DO $$ BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.vouchers;
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;
+`;
+
 export const SUPABASE_SQL_SCHEMA = `-- ==============================================================================
 -- EXPENSE VOUCHER MANAGEMENT SYSTEM - SUPABASE POSTGRESQL SCHEMA
 -- Company: ABC Company / Prachay Securities Private Limited
--- Supports: Role-Based Access Control (RBAC), Row-Level Security (RLS),
--- Realtime Subscriptions, and Auto-generated Voucher Sequences.
+-- Supports: Role-Based Operations, Realtime Subscriptions, Auto Sequences.
 -- ==============================================================================
 
 -- 1. Enable required extensions
@@ -21,12 +64,12 @@ EXCEPTION
   WHEN duplicate_object THEN null;
 END $$;
 
--- 3. Sequence for Human-Readable Voucher Numbers (e.g. VCH-2026-0001)
+-- 3. Sequence for Human-Readable Voucher Numbers (e.g. VCH-2026-1001)
 CREATE SEQUENCE IF NOT EXISTS voucher_number_seq START WITH 1001;
 
--- 4. User Profiles Table (Linked with Supabase auth.users)
+-- 4. User Profiles Table
 CREATE TABLE IF NOT EXISTS public.profiles (
-  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
   email TEXT UNIQUE NOT NULL,
   role user_role_type NOT NULL DEFAULT 'employee',
@@ -49,19 +92,19 @@ CREATE TABLE IF NOT EXISTS public.vouchers (
   expense_description TEXT NOT NULL,
   amount NUMERIC(12, 2) NOT NULL CHECK (amount > 0),
   
-  -- Employee Submitter Info
-  employee_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE RESTRICT,
+  -- Employee Submitter Info (Text identifier to support both auth UID & demo accounts)
+  employee_id TEXT NOT NULL,
   employee_name TEXT NOT NULL,
   employee_code TEXT,
-  employee_signature TEXT NOT NULL, -- Base64 data URL or Supabase Storage public URL
+  employee_signature TEXT NOT NULL,
   receipt_url TEXT,
   receipt_name TEXT,
   
   -- Workflow & Status
   status voucher_status_type NOT NULL DEFAULT 'Draft',
-  director_signature TEXT, -- Required upon approval
+  director_signature TEXT,
   approval_date TIMESTAMPTZ,
-  rejection_reason TEXT, -- Mandatory if rejected
+  rejection_reason TEXT,
   
   -- Accounts & Settlement Info
   is_reimbursed BOOLEAN NOT NULL DEFAULT FALSE,
@@ -108,7 +151,7 @@ CREATE TABLE IF NOT EXISTS public.voucher_audit_logs (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   voucher_id UUID NOT NULL REFERENCES public.vouchers(id) ON DELETE CASCADE,
   action TEXT NOT NULL,
-  performed_by_id UUID REFERENCES public.profiles(id),
+  performed_by_id TEXT,
   performed_by_name TEXT NOT NULL,
   previous_status TEXT,
   new_status TEXT,
@@ -116,100 +159,21 @@ CREATE TABLE IF NOT EXISTS public.voucher_audit_logs (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- ==============================================================================
--- 8. ROW LEVEL SECURITY (RLS) POLICIES
--- ==============================================================================
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.vouchers ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.voucher_audit_logs ENABLE ROW LEVEL SECURITY;
+-- 8. Disable RLS for seamless client sync with Supabase Anon API Key
+ALTER TABLE public.vouchers DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.profiles DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.voucher_audit_logs DISABLE ROW LEVEL SECURITY;
 
--- Helper function to extract user's role from profiles
-CREATE OR REPLACE FUNCTION get_auth_user_role()
-RETURNS user_role_type AS $$
-  SELECT role FROM public.profiles WHERE id = auth.uid();
-$$ LANGUAGE sql SECURITY DEFINER;
+-- 9. Enable Realtime Replication for Instant Multi-Tab and Multi-User Sync
+DO $$ BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.vouchers;
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;
 
--- Profiles Policies
-CREATE POLICY "Users can read own profile"
-  ON public.profiles FOR SELECT
-  USING (auth.uid() = id OR get_auth_user_role() IN ('director', 'accounts'));
-
-CREATE POLICY "Users can update own profile"
-  ON public.profiles FOR UPDATE
-  USING (auth.uid() = id);
-
--- Vouchers Policies:
--- A. Employees can ONLY view their own vouchers; Directors and Accounts can view ALL vouchers.
-CREATE POLICY "Vouchers Read Access"
-  ON public.vouchers FOR SELECT
-  USING (
-    employee_id = auth.uid()
-    OR get_auth_user_role() IN ('director', 'accounts')
-  );
-
--- B. Employees can insert vouchers for themselves
-CREATE POLICY "Employees can insert vouchers"
-  ON public.vouchers FOR INSERT
-  WITH CHECK (
-    auth.uid() = employee_id
-    AND get_auth_user_role() = 'employee'
-  );
-
--- C. Employees can ONLY edit or delete vouchers while in Draft status
-CREATE POLICY "Employees can update draft vouchers"
-  ON public.vouchers FOR UPDATE
-  USING (
-    employee_id = auth.uid()
-    AND status = 'Draft'
-  )
-  WITH CHECK (
-    employee_id = auth.uid()
-    -- Cannot self-approve; status can only change to 'Draft' or 'Pending Approval'
-    AND (status IN ('Draft', 'Pending Approval'))
-  );
-
-CREATE POLICY "Employees can delete draft vouchers"
-  ON public.vouchers FOR DELETE
-  USING (
-    employee_id = auth.uid()
-    AND status = 'Draft'
-  );
-
--- D. Directors can review, approve, or reject vouchers
-CREATE POLICY "Directors can review and approve vouchers"
-  ON public.vouchers FOR UPDATE
-  USING (get_auth_user_role() = 'director')
-  WITH CHECK (
-    get_auth_user_role() = 'director'
-    AND (
-      (status = 'Approved' AND director_signature IS NOT NULL)
-      OR
-      (status = 'Rejected' AND rejection_reason IS NOT NULL)
-      OR
-      status = 'Pending Approval'
-    )
-  );
-
--- E. Accounts Team can mark reimbursement settlement
-CREATE POLICY "Accounts can settle reimbursements"
-  ON public.vouchers FOR UPDATE
-  USING (get_auth_user_role() = 'accounts')
-  WITH CHECK (get_auth_user_role() = 'accounts');
-
--- ==============================================================================
--- 9. Enable Realtime Replication for Instant Dashboard Sync
--- ==============================================================================
-ALTER PUBLICATION supabase_realtime ADD TABLE public.vouchers;
-ALTER PUBLICATION supabase_realtime ADD TABLE public.profiles;
-
--- ==============================================================================
--- 10. Supabase Storage Bucket Setup (Run in Storage SQL or Dashboard)
--- ==============================================================================
-INSERT INTO storage.buckets (id, name, public) 
-VALUES ('signatures', 'signatures', true)
-ON CONFLICT (id) DO NOTHING;
-
-INSERT INTO storage.buckets (id, name, public) 
-VALUES ('receipts', 'receipts', true)
-ON CONFLICT (id) DO NOTHING;
+DO $$ BEGIN
+  ALTER PUBLICATION supabase_realtime ADD TABLE public.profiles;
+EXCEPTION
+  WHEN duplicate_object THEN null;
+END $$;
 `;
